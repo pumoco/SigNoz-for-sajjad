@@ -40,7 +40,7 @@ exporters:
 
 extensions:
   health_check:
-    endpoint: 0.0.0.0:13133
+    endpoint: 0.0.0.0:8000
 
 service:
   extensions: [health_check]

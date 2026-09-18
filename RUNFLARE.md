@@ -14,14 +14,14 @@ Runflare settings:
 - Branch: `main`
 - Build mode: Dockerfile
 - Dockerfile path: `Dockerfile`
-- Service port: `4318` for external OTLP/HTTP, or the platform's required HTTP
-  port if it requires one public listener
+- Service port: `8000` (the Runflare-compatible public listener)
 - Container bind: Collector listens on `0.0.0.0`
-- Health endpoint: Collector health extension must be enabled before using
-  `/` on port `13133`
+- Health endpoint: `/` on port `8000`
 
-For a first Runflare smoke deployment, expose OTLP/HTTP only and do not expose
-4317 publicly. Put TLS/authentication/rate limiting at the platform edge.
+For this first Runflare smoke deployment, use the `8000` preset. OTLP/HTTP
+still listens internally on `4318`; it is not exposed directly by this
+single-port deployment. Put TLS/authentication/rate limiting at the platform
+edge.
 
 A collector-only deployment is not yet the complete SigNoz platform. The
 complete production phase requires official SigNoz services, ClickHouse,
