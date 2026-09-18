@@ -2,6 +2,8 @@ FROM otel/opentelemetry-collector-contrib:0.136.0
 
 COPY otel/collector.config.yaml /etc/otelcol-contrib/config.yaml
 
+ENV PORT=8000
+
 EXPOSE 8000
 
 HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=6 \
