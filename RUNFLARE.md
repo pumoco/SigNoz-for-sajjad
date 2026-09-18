@@ -14,11 +14,11 @@ Runflare settings:
 - Branch: `main`
 - Build mode: Dockerfile
 - Dockerfile path: `Dockerfile`
-- Service port: `3000` (Runflare maps HTTP `80` to container port `3000`)
+- Service port: `8000` (Runflare maps HTTP `80` to container port `8000`)
 - Container bind: Collector listens on `0.0.0.0`
-- Health endpoint: `/healthz` on port `3000`
+- Health endpoint: `/healthz` on port `8000`
 - Container health check: `/healthz` on port `8000` (Collector listener)
-- Public application port: `3000` (external HTTP `80`)
+- Public application port: `8000` (external HTTP `80`)
 - OTLP `4317`/`4318` must remain private or be exposed only through Runflare
   internal networking; services must not send telemetry to the health port.
 
