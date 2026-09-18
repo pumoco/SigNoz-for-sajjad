@@ -1,0 +1,7 @@
+# Never commit local secrets or runtime state.
+.env
+.env.*
+!.env.example
+data/
+volumes/
+*.log

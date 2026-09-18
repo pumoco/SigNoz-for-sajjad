@@ -1,0 +1,54 @@
+# Runtime configuration is supplied by Runflare. This file documents the
+# controlled boundary; SigNoz's official deployment bundle owns the internal
+# ClickHouse, query-service, frontend, and collector services.
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 75
+    spike_limit_percentage: 15
+  batch:
+    send_batch_size: 512
+    timeout: 5s
+  attributes/redact:
+    actions:
+      - key: api_key
+        action: delete
+      - key: authorization
+        action: delete
+      - key: password
+        action: delete
+      - key: secret
+        action: delete
+      - key: token
+        action: delete
+      - key: private_key
+        action: delete
+      - key: connection_string
+        action: delete
+
+exporters:
+  debug:
+    verbosity: basic
+
+service:
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes/redact, batch]
+      exporters: [debug]
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes/redact, batch]
+      exporters: [debug]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes/redact, batch]
+      exporters: [debug]
