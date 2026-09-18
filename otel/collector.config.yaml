@@ -37,7 +37,7 @@ processors:
 
 exporters:
   debug:
-    verbosity: basic
+    verbosity: detailed
 
 extensions:
   health_check:
