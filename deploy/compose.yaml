@@ -51,31 +51,11 @@ services:
     volumes:
     - ./ingester/ingester.yaml:/etc/otel-collector-config.yaml:ro
     - ./ingester/opamp.yaml:/etc/opamp-config.yaml:ro
-  signoz-metastore-postgres-0:
-    container_name: signoz-metastore-postgres-0
-    environment:
-    - POSTGRES_DB=signoz
-    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in the secret environment}
-    - POSTGRES_USER=signoz
-    healthcheck:
-      interval: 30s
-      retries: 3
-      start_period: 30s
-      test:
-      - CMD-SHELL
-      - pg_isready -U signoz -d signoz
-      timeout: 10s
-    image: postgres:16.4
-    networks:
-    - signoz-network
-    restart: unless-stopped
-    volumes:
-    - signoz-metastore-postgres-0-data:/var/lib/postgresql/data
   signoz-signoz-0:
     container_name: signoz-signoz-0
     environment:
-    - SIGNOZ_SQLSTORE_POSTGRES_DSN=postgres://signoz:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in the secret environment}@signoz-metastore-postgres-0:5432/signoz?sslmode=disable
-    - SIGNOZ_SQLSTORE_PROVIDER=postgres
+    - SIGNOZ_SQLSTORE_PROVIDER=sqlite
+    - SIGNOZ_SQLSTORE_SQLITE_PATH=/var/lib/signoz/signoz.db
     - SIGNOZ_TELEMETRYSTORE_CLICKHOUSE_DSN=tcp://signoz-telemetrystore-clickhouse-0-0:9000
     - SIGNOZ_TELEMETRYSTORE_PROVIDER=clickhouse
     healthcheck:
@@ -96,6 +76,8 @@ services:
     - 8080
     - 4320
     restart: unless-stopped
+    volumes:
+    - /signoz-clickhouse/metastore:/var/lib/signoz
   signoz-telemetrykeeper-clickhousekeeper-0:
     container_name: signoz-telemetrykeeper-clickhousekeeper-0
     entrypoint:
@@ -191,8 +173,6 @@ services:
     - signoz-network
     restart: on-failure
 volumes:
-  signoz-metastore-postgres-0-data:
-    name: signoz-metastore-postgres-0-data
   signoz-telemetrykeeper-0-data:
     name: signoz-telemetrykeeper-0-data
   signoz-telemetrystore-user-scripts:

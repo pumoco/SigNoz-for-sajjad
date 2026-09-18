@@ -6,10 +6,10 @@ Deployment definition
 
 - Primary file: `deploy/compose.yaml`
 - Root Compose entry point: `docker-compose.yml` includes the deployment file.
-- All images are explicitly tagged: SigNoz and SigNoz OTEL collector `v0.142.1`, gateway collector `0.136.0`, ClickHouse/Keeper `25.12.5`, and PostgreSQL `16.4`.
+- All images are explicitly tagged: SigNoz and SigNoz OTEL collector `v0.142.1`, gateway collector `0.136.0`, and ClickHouse/Keeper `25.12.5`.
 - `deploy/ingester`, `deploy/telemetrykeeper`, and `deploy/telemetrystore` are copied from that Foundry deployment example; only the gateway, image pins, secret interpolation, private port exposure, and existing ClickHouse mount are repository adaptations.
 - `signoz-clickhouse` is an existing external Runflare volume mounted at `/var/lib/clickhouse`. It must not be deleted, recreated, or migrated destructively.
-- Other named volumes hold PostgreSQL metastore, Keeper state, ClickHouse user scripts, and Keeper/ClickHouse state.
+- SigNoz uses its official embedded SQLite metastore mode; the database is stored at `/signoz-clickhouse/metastore/signoz.db` on the existing disk. No PostgreSQL service, DSN, migration, or health check is present.
 
 Services and network
 
@@ -17,10 +17,9 @@ All services are on the private `signoz-network`, which must map to the Runflare
 
 - `otel-gateway`: OpenTelemetry Collector, internal 4317/4318 and health 8000.
 - `ingester`: SigNoz OpenTelemetry ingestion backend, internal 4317/4318 and health 13133.
-- `signoz-signoz-0`: SigNoz Query Service and frontend, internal HTTP 8080.
+- `signoz-signoz-0`: SigNoz Query Service and frontend, internal HTTP 8080; embedded SQLite metastore at `/var/lib/signoz/signoz.db` (single-node metadata storage).
 - `signoz-telemetrystore-clickhouse-0-0`: ClickHouse, internal native 9000 and HTTP 8123 only.
 - `signoz-telemetrykeeper-clickhousekeeper-0`: ClickHouse Keeper, internal client 9181 only.
-- `signoz-metastore-postgres-0`: PostgreSQL metastore, internal 5432 only.
 - `signoz-telemetrystore-migrator`: required ClickHouse schema migration job.
 - `signoz-telemetrystore-clickhouse-user-scripts`: required histogram executable initialization job.
 
@@ -33,7 +32,7 @@ Set `SIGNOZ_OTLP_HTTP_ENDPOINT=http://signoz-ingester:4318` for `otel-gateway`. 
 Required variables and secrets
 
 - `SIGNOZ_OTLP_HTTP_ENDPOINT` — required for the collector; recommended value `http://signoz-ingester:4318`.
-- `POSTGRES_PASSWORD` — required secret. Do not commit it. The Compose file uses `${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}`.
+- No PostgreSQL variable or secret is required. SigNoz uses `SIGNOZ_SQLSTORE_PROVIDER=sqlite` and `SIGNOZ_SQLSTORE_SQLITE_PATH=/var/lib/signoz/signoz.db`.
 - `COLLECTOR_HEALTH_PORT` — optional private/approved health mapping for host port 8000; it does not change the collector listener.
 
 Startup order
@@ -42,10 +41,9 @@ Startup order
 2. ClickHouse user scripts finish successfully.
 3. ClickHouse becomes healthy using the existing persistent data volume.
 4. The migrator runs `ready`, `bootstrap`, synchronous, and asynchronous migrations.
-5. PostgreSQL becomes healthy independently for the SigNoz SQL store.
-6. `signoz-signoz-0` starts after PostgreSQL, ClickHouse, and migrations; its health endpoint is `/api/v1/health` on port 8080.
-7. `ingester` starts after ClickHouse and migrations and exposes OTLP internally.
-8. `otel-gateway` accepts telemetry on its unchanged 4317/4318 listeners and exports OTLP/HTTP to `signoz-ingester:4318`.
+5. `signoz-signoz-0` starts with its embedded SQLite metastore and ClickHouse; its health endpoint is `/api/v1/health` on port 8080.
+6. `ingester` starts after ClickHouse and migrations and exposes OTLP internally.
+7. `otel-gateway` accepts telemetry on its unchanged 4317/4318 listeners and exports OTLP/HTTP to `signoz-ingester:4318`.
 
 Verification
 
