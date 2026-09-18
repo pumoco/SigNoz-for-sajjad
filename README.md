@@ -77,3 +77,22 @@ The collector forwards telemetry to `SIGNOZ_OTLP_HTTP_ENDPOINT`; a
 collector-only deployment is not a searchable SigNoz backend. The repository
 does not claim a live deployment until the exact Runflare
 commit, health response, public routes, and telemetry round-trip are verified.
+
+## Query-readiness gate
+
+Run the verification script against the public UI/API origin after deployment:
+
+    python scripts/verify_signoz.py https://signoz.example.invalid
+
+The script requires both `/healthz` and the SigNoz query routes
+`/api/v1/health` and `/api/v1/logs` to respond successfully. A healthy
+collector with `404` query routes intentionally fails. This prevents a
+collector-only deployment from being reported as a usable log-follow-up plane.
+
+The Docker service in this repository is the ingestion boundary only. The
+production deployment must run the pinned official SigNoz bundle (query/API,
+frontend, ClickHouse, schema migrators, and collector) on the same private
+network. Only the frontend/API port is public; OTLP and ClickHouse ports remain
+private. The Runflare deployment must therefore provide either a multi-service
+project or an equivalent private service topology before this repository can
+pass the query-readiness gate.
