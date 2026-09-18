@@ -73,5 +73,7 @@ small Runflare instance; SigNoz with ClickHouse is not a lightweight service.
 5. Run the five-minute observation cycle and correlate logs, traces, and
    metrics.
 
-The repository does not claim a live deployment until the exact Runflare
+The collector forwards telemetry to `SIGNOZ_OTLP_HTTP_ENDPOINT`; a
+collector-only deployment is not a searchable SigNoz backend. The repository
+does not claim a live deployment until the exact Runflare
 commit, health response, public routes, and telemetry round-trip are verified.

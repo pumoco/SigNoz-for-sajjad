@@ -38,6 +38,13 @@ processors:
 exporters:
   debug:
     verbosity: detailed
+  otlphttp/signoz:
+    endpoint: ${env:SIGNOZ_OTLP_HTTP_ENDPOINT}
+    compression: gzip
+    sending_queue:
+      enabled: true
+    retry_on_failure:
+      enabled: true
 
 extensions:
   health_check:
@@ -50,12 +57,12 @@ service:
     logs:
       receivers: [otlp]
       processors: [memory_limiter, attributes/redact, batch]
-      exporters: [debug]
+      exporters: [debug, otlphttp/signoz]
     traces:
       receivers: [otlp]
       processors: [memory_limiter, attributes/redact, batch]
-      exporters: [debug]
+      exporters: [debug, otlphttp/signoz]
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, attributes/redact, batch]
-      exporters: [debug]
+      exporters: [debug, otlphttp/signoz]
