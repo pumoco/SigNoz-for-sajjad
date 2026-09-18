@@ -1,0 +1,141 @@
+# Official SigNoz Foundry compose topology, adapted only to pin v0.142.1,
+# preserve private services, and bind the existing Runflare volume.
+name: signoz
+networks:
+  signoz-network:
+    name: signoz-network
+services:
+  ingester:
+    entrypoint: ["/bin/sh"]
+    command:
+      - -c
+      - |
+        /signoz-otel-collector migrate sync check &&
+        /signoz-otel-collector --config=/etc/otel-collector-config.yaml --manager-config=/etc/opamp-config.yaml --copy-path=/var/tmp/collector-config.yaml
+    image: signoz/signoz-otel-collector:v0.142.1
+    environment:
+      LOW_CARDINAL_EXCEPTION_GROUPING: "false"
+      SIGNOZ_OTEL_COLLECTOR_CLICKHOUSE_DSN: tcp://signoz-telemetrystore-clickhouse-0-0:9000
+      SIGNOZ_OTEL_COLLECTOR_TIMEOUT: 10m
+    networks:
+      signoz-network:
+        aliases: [signoz-ingester]
+    expose: ["4317", "4318"]
+    restart: unless-stopped
+    depends_on:
+      signoz-telemetrystore-migrator:
+        condition: service_completed_successfully
+    volumes:
+      - ./ingester/ingester.yaml:/etc/otel-collector-config.yaml:ro
+      - ./ingester/opamp.yaml:/etc/opamp-config.yaml:ro
+
+  signoz-metastore-postgres-0:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: signoz
+      POSTGRES_USER: signoz
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in the Runflare secret environment}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U signoz -d signoz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks: [signoz-network]
+    restart: unless-stopped
+    volumes:
+      - signoz-metastore-postgres-0-data:/var/lib/postgresql/data
+
+  signoz-signoz-0:
+    image: signoz/signoz:v0.142.1
+    environment:
+      SIGNOZ_SQLSTORE_POSTGRES_DSN: postgres://signoz:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in the Runflare secret environment}@signoz-metastore-postgres-0:5432/signoz?sslmode=disable
+      SIGNOZ_SQLSTORE_PROVIDER: postgres
+      SIGNOZ_TELEMETRYSTORE_CLICKHOUSE_DSN: tcp://signoz-telemetrystore-clickhouse-0-0:9000
+      SIGNOZ_TELEMETRYSTORE_PROVIDER: clickhouse
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks: [signoz-network]
+    expose: ["8080", "4320"]
+    restart: unless-stopped
+    depends_on:
+      signoz-metastore-postgres-0:
+        condition: service_healthy
+      signoz-telemetrystore-migrator:
+        condition: service_completed_successfully
+
+  signoz-telemetrykeeper-clickhousekeeper-0:
+    image: clickhouse/clickhouse-keeper:25.12.5
+    entrypoint: ["/usr/bin/clickhouse-keeper", "--config-file=/etc/clickhouse-keeper/keeper.yaml"]
+    healthcheck:
+      test: ["CMD", "clickhouse-keeper-client", "-h", "localhost", "-p", "9181", "-q", "ls"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks: [signoz-network]
+    restart: unless-stopped
+    volumes:
+      - signoz-telemetrykeeper-0-data:/var/lib/clickhouse-keeper
+      - ./telemetrykeeper/clickhousekeeper/keeper-0.yaml:/etc/clickhouse-keeper/keeper.yaml:ro
+
+  signoz-telemetrystore-clickhouse-0-0:
+    image: clickhouse/clickhouse-server:25.12.5
+    environment:
+      CLICKHOUSE_SKIP_USER_SETUP: "1"
+      CLICKHOUSE_CONFIG: /etc/clickhouse-server/config-0-0.yaml
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks: [signoz-network]
+    restart: unless-stopped
+    depends_on:
+      signoz-telemetrykeeper-clickhousekeeper-0:
+        condition: service_healthy
+      signoz-telemetrystore-clickhouse-user-scripts:
+        condition: service_completed_successfully
+    volumes:
+      - /signoz-clickhouse:/var/lib/clickhouse
+      - signoz-telemetrystore-user-scripts:/var/lib/clickhouse/user_scripts:ro
+      - ./telemetrystore/clickhouse/config-0-0.yaml:/etc/clickhouse-server/config-0-0.yaml:ro
+      - ./telemetrystore/clickhouse/functions.yaml:/etc/clickhouse-server/functions.yaml:ro
+
+  signoz-telemetrystore-clickhouse-user-scripts:
+    image: clickhouse/clickhouse-server:25.12.5
+    command: ["bash", "-c", "version=v0.0.1; os=$$(uname -s | tr '[:upper:]' '[:lower:]'); arch=$$(uname -m | sed s/aarch64/arm64/ | sed s/x86_64/amd64/); cd /tmp; wget -O histogram.tar.gz https://github.com/SigNoz/signoz/releases/download/histogram-quantile%2F$${version}/histogram-quantile_$${os}_$${arch}.tar.gz; tar -xzf histogram.tar.gz; mv histogram-quantile /var/lib/clickhouse/user_scripts/histogramQuantile"]
+    networks: [signoz-network]
+    restart: on-failure
+    volumes:
+      - signoz-telemetrystore-user-scripts:/var/lib/clickhouse/user_scripts
+
+  signoz-telemetrystore-migrator:
+    entrypoint: ["/bin/sh"]
+    command:
+      - -c
+      - |
+        /signoz-otel-collector migrate ready &&
+        /signoz-otel-collector migrate bootstrap &&
+        /signoz-otel-collector migrate sync up &&
+        /signoz-otel-collector migrate async up
+    image: signoz/signoz-otel-collector:v0.142.1
+    environment:
+      LOW_CARDINAL_EXCEPTION_GROUPING: "false"
+      SIGNOZ_OTEL_COLLECTOR_CLICKHOUSE_DSN: tcp://signoz-telemetrystore-clickhouse-0-0:9000
+      SIGNOZ_OTEL_COLLECTOR_TIMEOUT: 10m
+    networks: [signoz-network]
+    restart: on-failure
+    depends_on:
+      signoz-telemetrystore-clickhouse-0-0:
+        condition: service_healthy
+
+volumes:
+  signoz-metastore-postgres-0-data:
+  signoz-telemetrykeeper-0-data:
+  signoz-telemetrystore-user-scripts:
