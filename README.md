@@ -1,12 +1,13 @@
 # SigNoz v0.142.1 deployment
 
-This repository contains an executable Compose definition for the official SigNoz v0.142.1 Foundry topology. No Redis or placeholder nginx service is used.
+This repository contains an executable Compose definition synced from the official SigNoz Foundry deployment example at GitHub commit `997cff5c40333f4b7f3b7f8d710a2f7e65c8f4af`. The SigNoz and collector images remain pinned to `v0.142.1`; no Redis or placeholder nginx service is used.
 
 Deployment definition
 
 - Primary file: `deploy/compose.yaml`
 - Root Compose entry point: `docker-compose.yml` includes the deployment file.
-- All images are explicitly tagged: SigNoz `v0.142.1`, collector `0.136.0`, ClickHouse/ Keeper `25.12.5`, PostgreSQL `16.4`.
+- All images are explicitly tagged: SigNoz and SigNoz OTEL collector `v0.142.1`, gateway collector `0.136.0`, ClickHouse/Keeper `25.12.5`, and PostgreSQL `16.4`.
+- `deploy/ingester`, `deploy/telemetrykeeper`, and `deploy/telemetrystore` are copied from that Foundry deployment example; only the gateway, image pins, secret interpolation, private port exposure, and existing ClickHouse mount are repository adaptations.
 - `signoz-clickhouse` is an existing external Runflare volume mounted at `/var/lib/clickhouse`. It must not be deleted, recreated, or migrated destructively.
 - Other named volumes hold PostgreSQL metastore, Keeper state, ClickHouse user scripts, and Keeper/ClickHouse state.
 

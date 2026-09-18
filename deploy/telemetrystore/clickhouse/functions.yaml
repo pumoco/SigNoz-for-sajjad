@@ -1,8 +1,11 @@
 functions:
   argument:
-    - {name: buckets, type: Array(Float64)}
-    - {name: counts, type: Array(Float64)}
-    - {name: quantile, type: Float64}
+  - name: buckets
+    type: Array(Float64)
+  - name: counts
+    type: Array(Float64)
+  - name: quantile
+    type: Float64
   command: ./histogramQuantile
   format: CSV
   name: histogramQuantile
