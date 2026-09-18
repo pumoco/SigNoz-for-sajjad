@@ -29,10 +29,10 @@ platform-provided `PORT` value and bind to `0.0.0.0`.
 
 Required environment variables:
 
-- `PORT` — Runflare-assigned HTTP port; default `8080` in local Compose.
+- `PORT` — Runflare-assigned HTTP port; this deployment uses `8000`.
 - `SIGNOZ_UI_BASE_URL` — public HTTPS URL for the SigNoz UI.
-- `OTEL_PUBLIC_BASE_URL` — public HTTPS URL for OTLP/HTTP ingestion when
-  services are outside the private Runflare network.
+- `OTEL_EXPORTER_OTLP_ENDPOINT` — collector OTLP/HTTP endpoint; use the private
+  service address when Runflare networking supports it.
 - `SIGNOZ_ADMIN_USER` — optional operator identity; store the value in
   Runflare secrets, never in Git.
 - `SIGNOZ_ADMIN_PASSWORD` — required operator secret; store only in Runflare
@@ -59,7 +59,7 @@ Do not commit `.env` or credentials. Start from `.env.example`.
 1. Copy `.env.example` to `.env` and set local values.
 2. Run `docker compose config` to validate interpolation.
 3. Run `docker compose up -d`.
-4. Verify `http://localhost:8080/healthz` and the SigNoz UI.
+4. Verify `http://localhost:8000/healthz` and the SigNoz UI.
 
 Local defaults are for development only. Review resource limits before using a
 small Runflare instance; SigNoz with ClickHouse is not a lightweight service.
