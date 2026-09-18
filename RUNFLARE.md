@@ -17,6 +17,9 @@ Runflare settings:
 - Service port: `8000` (the Runflare-compatible public listener)
 - Container bind: Collector listens on `0.0.0.0`
 - Health endpoint: `/` on port `8000`
+- Public application port: `8000`
+- OTLP `4317`/`4318` must remain private or be exposed only through Runflare
+  internal networking; services must not send telemetry to the health port.
 
 For this first Runflare smoke deployment, use the `8000` preset. OTLP/HTTP
 still listens internally on `4318`; it is not exposed directly by this
