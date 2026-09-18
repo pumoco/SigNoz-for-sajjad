@@ -1,102 +1,80 @@
-# SigNoz observability stack
+# SigNoz v0.142.1 deployment
 
-## Status
+This repository contains an executable Compose definition for the official SigNoz v0.142.1 Foundry topology. No Redis or placeholder nginx service is used.
 
-This repository preserves the existing OpenTelemetry Collector as the Runflare ingestion boundary. The official SigNoz Foundry Docker topology is in `deploy/compose.yaml`, pinned to SigNoz `v0.142.1`. The stack is not production-ready until Runflare deployment and an end-to-end searchable logs/traces/metrics test have passed.
+Deployment definition
 
-## Architecture
+- Primary file: `deploy/compose.yaml`
+- Root Compose entry point: `docker-compose.yml` includes the deployment file.
+- All images are explicitly tagged: SigNoz `v0.142.1`, collector `0.136.0`, ClickHouse/ Keeper `25.12.5`, PostgreSQL `16.4`.
+- `signoz-clickhouse` is an existing external Runflare volume mounted at `/var/lib/clickhouse`. It must not be deleted, recreated, or migrated destructively.
+- Other named volumes hold PostgreSQL metastore, Keeper state, ClickHouse user scripts, and Keeper/ClickHouse state.
 
-Agents and microservices -> OTLP -> existing `otel-gateway` -> SigNoz ingester -> ClickHouse -> SigNoz Query Service -> frontend.
+Services and network
 
-The existing gateway remains the only client-facing OTLP boundary. Its `otel/collector.config.yaml` keeps OTLP gRPC `4317`, OTLP HTTP `4318`, and health `8000 /healthz`, plus redaction and batching. Its exporter endpoint is supplied as `SIGNOZ_OTLP_HTTP_ENDPOINT`; in Runflare this must resolve to the private backend ingester (`http://signoz-ingester:4318`) over Cluster Network.
+All services are on the private `signoz-network`, which must map to the Runflare Cluster Network:
 
-## Selected official release and images
+- `otel-gateway`: OpenTelemetry Collector, internal 4317/4318 and health 8000.
+- `ingester`: SigNoz OpenTelemetry ingestion backend, internal 4317/4318 and health 13133.
+- `signoz-signoz-0`: SigNoz Query Service and frontend, internal HTTP 8080.
+- `signoz-telemetrystore-clickhouse-0-0`: ClickHouse, internal native 9000 and HTTP 8123 only.
+- `signoz-telemetrykeeper-clickhousekeeper-0`: ClickHouse Keeper, internal client 9181 only.
+- `signoz-metastore-postgres-0`: PostgreSQL metastore, internal 5432 only.
+- `signoz-telemetrystore-migrator`: required ClickHouse schema migration job.
+- `signoz-telemetrystore-clickhouse-user-scripts`: required histogram executable initialization job.
 
-Release: `v0.142.1` (official SigNoz source). Images:
+Runflare routing
 
-- `signoz/signoz:v0.142.1` — Query Service/API and UI, container port `8080`.
-- `signoz/signoz-otel-collector:v0.142.1` — official backend ingester and migrator, OTLP ports `4317`/`4318`.
-- `clickhouse/clickhouse-server:25.12.5` — telemetry store, private ports `8123`/`9000`.
-- `clickhouse/clickhouse-keeper:25.12.5` — ClickHouse coordination, private ports `9181`/`9234`.
-- `postgres:16` — SigNoz metastore, private port `5432`.
-- `otel/opentelemetry-collector-contrib:0.136.0` — existing gateway image; do not replace it as part of backend rollout.
+Route `signoz.pumograph.ir` to `signoz-signoz-0:8080`. Do not route it to the collector or nginx. Keep the collector health check available as a separate private/public health mapping, for example `collector-health.pumograph.ir` to `otel-gateway:8000`, because one hostname cannot safely route both the frontend root and `/healthz` without a supported Runflare path router.
 
-The release topology and migration commands are based on the official Foundry Docker compose example, with only version pinning, secret interpolation, and the existing `/signoz-clickhouse` bind mount adapted here.
+Set `SIGNOZ_OTLP_HTTP_ENDPOINT=http://signoz-ingester:4318` for `otel-gateway`. The collector exports to the actual ingestion service alias `signoz-ingester`, not a nonexistent `signoz` service. Keep OTLP ports private; only the frontend route and an explicitly approved collector health mapping may be public.
 
-## Exact service topology
+Required variables and secrets
 
-| Service | Container port | Runflare exposure | Visibility | Purpose |
-|---|---:|---|---|---|
-| existing `otel-gateway` | 8000, 4317, 4318 | keep existing service exposure | gateway boundary | health, OTLP gRPC/HTTP |
-| `signoz-signoz-0` | 8080, 4320 | expose only frontend 8080 | public frontend only | real Query Service/API and UI |
-| `ingester` | 4317, 4318 | Cluster Network only | private | backend OTLP ingestion to ClickHouse |
-| `signoz-metastore-postgres-0` | 5432 | Cluster Network only | private | SigNoz SQL metastore |
-| `signoz-telemetrystore-clickhouse-0-0` | 8123, 9000 | Cluster Network only | private | logs, traces, metrics storage |
-| `signoz-telemetrykeeper-clickhousekeeper-0` | 9181, 9234 | Cluster Network only | private | ClickHouse coordination |
-| `signoz-telemetrystore-migrator` | none | none | private/job | schema bootstrap and migrations |
-| `signoz-telemetrystore-clickhouse-user-scripts` | none | none | private/job | official histogram function binary |
+- `SIGNOZ_OTLP_HTTP_ENDPOINT` — required for the collector; recommended value `http://signoz-ingester:4318`.
+- `POSTGRES_PASSWORD` — required secret. Do not commit it. The Compose file uses `${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}`.
+- `COLLECTOR_HEALTH_PORT` — optional private/approved health mapping for host port 8000; it does not change the collector listener.
 
-Never publish ClickHouse, PostgreSQL, the backend ingester, Query Service API, or OTLP ports merely to make the deployment work.
+Startup order
 
-## Runflare deployment
+1. ClickHouse Keeper becomes healthy.
+2. ClickHouse user scripts finish successfully.
+3. ClickHouse becomes healthy using the existing persistent data volume.
+4. The migrator runs `ready`, `bootstrap`, synchronous, and asynchronous migrations.
+5. PostgreSQL becomes healthy independently for the SigNoz SQL store.
+6. `signoz-signoz-0` starts after PostgreSQL, ClickHouse, and migrations; its health endpoint is `/api/v1/health` on port 8080.
+7. `ingester` starts after ClickHouse and migrations and exposes OTLP internally.
+8. `otel-gateway` accepts telemetry on its unchanged 4317/4318 listeners and exports OTLP/HTTP to `signoz-ingester:4318`.
 
-Create or use one private Cluster Network and map these DNS/service aliases:
+Verification
 
-- existing collector -> `otel-gateway`; set secret environment `SIGNOZ_OTLP_HTTP_ENDPOINT=http://signoz-ingester:4318`.
-- backend ingester -> `signoz-ingester:4318` reachable from the collector.
-- `signoz-signoz-0` -> `signoz-signoz-0:8080` for the public frontend route.
-- all backend services use the names in `deploy/compose.yaml` on `signoz-network`.
-
-Set `POSTGRES_PASSWORD` as a Runflare secret. Do not commit its value. The SigNoz DSN is built from that secret at startup. Set `LOW_CARDINAL_EXCEPTION_GROUPING` only if required by the official collector image; leave it secret-free.
-
-Startup order is: ClickHouse Keeper -> ClickHouse user scripts -> ClickHouse -> migrator (`ready`, `bootstrap`, `sync up`, `async up`) -> Query Service and backend ingester. The existing collector may start independently and retries its exporter until the private ingester is ready.
-
-ClickHouse data is mounted from the existing Runflare volume path `/signoz-clickhouse` to `/var/lib/clickhouse`. Do not delete or recreate that volume. Five GB is initial/development capacity and must be expanded before sustained telemetry ingestion.
-
-### Domain routing
-
-The current `https://signoz.pumograph.ir/healthz` route must remain pointed at the existing collector until a supported Runflare route is configured. The final UI route should point `https://signoz.pumograph.ir` to `signoz-signoz-0:8080`. Because a single hostname cannot generally target both services, Runflare must either provide path-based routing with `/healthz` explicitly sent to `otel-gateway:8000`, or retain a separate collector health hostname and update the health-check target. Do not switch the domain blindly: verify the collector health route returns `200` after the change.
-
-## Resource attributes
-
-Applications should send `service.name`, `service.version`, `deployment.environment`, `host.name`, `container.name`, `request_id`, and native trace/span IDs. Agents may additionally send `agent.name`, `agent.model`, `task.id`, and `workflow.id`. The gateway redacts common credential-shaped attributes; it does not invent missing telemetry.
-
-## Verification
-
-Run syntax and Compose validation locally:
-
-```bash
+```sh
 python -m py_compile scripts/verify_signoz.py
-POSTGRES_PASSWORD='[REDACTED]' docker compose -f deploy/compose.yaml config
-```
-
-Check collector liveness and Query Service readiness separately:
-
-```bash
 python scripts/verify_signoz.py \
-  --collector https://collector-health.example/ \
-  --query https://signoz.pumograph.ir/
+  --collector http://otel-gateway:8000 \
+  --query http://signoz-signoz-0:8080 \
+  --backend http://ingester:13133 \
+  --clickhouse http://signoz-telemetrystore-clickhouse-0-0:8123 \
+  --send-otlp \
+  --logs-payload payloads/logs.json \
+  --traces-payload payloads/traces.json \
+  --metrics-payload payloads/metrics.json
 ```
 
-Expected: `collector_liveness.status == 200` and `query_readiness.status == 200`. A collector `200` alone is not Query Service readiness.
+The verifier reports independently: collector liveness, Query/API readiness, backend readiness, ClickHouse readiness, OTLP ingestion, searchable logs, searchable traces, and searchable metrics. Search payloads must be real Query Service payloads; the script does not fake SigNoz APIs.
 
-After Runflare deployment, send one deterministic readiness log (the script adds `service.name=signoz-readiness-test`, `service.version=readiness`, `deployment.environment=verification`, `request_id`, and `task.id`):
+Required local checks:
 
-```bash
-python scripts/verify_signoz.py \
-  --collector https://collector-health.example/ \
-  --query https://signoz.pumograph.ir/ \
-  --send-readiness-log
+```sh
+python - <<'PY'
+from pathlib import Path
+import yaml
+for path in [Path('deploy/compose.yaml'), Path('docker-compose.yml'), *Path('deploy').rglob('*.yaml')]:
+    yaml.safe_load(path.read_text())
+    print(path)
+PY
+python -m py_compile scripts/verify_signoz.py
+git diff --check
 ```
 
-Then use the real SigNoz UI or Query Service `/api/v5/query_range` with a valid query payload to search `service.name = signoz-readiness-test` and confirm the request/trace identifiers. Repeat with one OTLP trace and one OTLP metric, and record the returned identifiers. The verifier accepts `--query-payload FILE --query-path /api/v5/query_range` for that actual search; it never treats `/healthz` as search evidence.
-
-## Verification status
-
-`IMPLEMENTED`: official pinned backend topology, non-destructive ClickHouse mount, secret interpolation, preserved collector configuration, and separate readiness/e2e verification tooling.
-
-`VALIDATED`: local Python syntax and static configuration checks only, until Runflare is exercised.
-
-`REQUIRES RUNFLARE ACTION`: deploy backend services, create Cluster Network mappings, set secrets, route the frontend domain while preserving collector health, and run searchable logs/traces/metrics tests.
-
-`BLOCKED`: no production-readiness claim is possible before end-to-end telemetry is actually found through the real SigNoz Query Service.
+No deployment, DNS change, Runflare mutation, or push is performed by repository validation.

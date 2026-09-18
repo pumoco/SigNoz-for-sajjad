@@ -5,6 +5,27 @@ networks:
   signoz-network:
     name: signoz-network
 services:
+  otel-gateway:
+    image: otel/opentelemetry-collector-contrib:0.136.0
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    environment:
+      SIGNOZ_OTLP_HTTP_ENDPOINT: ${SIGNOZ_OTLP_HTTP_ENDPOINT:-http://signoz-ingester:4318}
+    volumes:
+      - ../otel/collector.config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    expose:
+      - "4317"
+      - "4318"
+      - "8000"
+    ports:
+      - "${COLLECTOR_HEALTH_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8000/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    networks:
+      - signoz-network
+
   ingester:
     entrypoint: ["/bin/sh"]
     command:
@@ -30,7 +51,7 @@ services:
       - ./ingester/opamp.yaml:/etc/opamp-config.yaml:ro
 
   signoz-metastore-postgres-0:
-    image: postgres:16
+    image: postgres:16.4
     environment:
       POSTGRES_DB: signoz
       POSTGRES_USER: signoz
